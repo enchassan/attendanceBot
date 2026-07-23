@@ -1,3 +1,5 @@
+const SLACK_BOT_TOKEN = "YOUR_SLACK_BOT_TOKEN"; 
+const HR_SLACK_WEBHOOK_URL = "YOUR_HR_SLACK_WEBHOOK_URL";
 const TIMEZONE = "GMT+5";
 
 // =================================================================
@@ -160,7 +162,7 @@ function handleLogin(params, args) {
   // EXCEPTION FIX: PRIOR DATE STRICT REPLACEMENT
   // =================================================================
   if (targetDate < todayStr && !isReplaced) {
-    return sendEphemeralResponse(`⚠️ *Missing Replace Flag!* You are trying to log attendance for a past date (*${targetDate}*). You must use the \`--replace true\` flag to authorize logging prior attendance.\nExample: \`/login --date ${targetDate} --replace true --time HH:MM\``);
+    return sendEphemeralResponse(`⚠️ *Missing Replace Flag!* You are trying to log attendance for a past date (*${targetDate}*). You must use the \`--replace\` flag to authorize logging prior attendance.\nExample: \`/login --date ${targetDate} --replace --time HH:MM\``);
   }
 
   const data = sheet.getDataRange().getDisplayValues();
@@ -189,7 +191,7 @@ function handleLogin(params, args) {
     
     // Prevent duplicate logins without --replace
     if (existingLoginTime !== "" && !isReplaced) {
-      return sendEphemeralResponse(`⚠️ *Already Logged In!* You checked in at *${existingLoginTime}*. If you are trying to overwrite this, you must use the \`--replace true\` flag.`);
+      return sendEphemeralResponse(`⚠️ *Already Logged In!* You checked in at *${existingLoginTime}*. If you are trying to overwrite this, you must use the \`--replace\` flag.`);
     }
 
     // VALIDATION FIX: Prevent login time > logout time
@@ -198,7 +200,7 @@ function handleLogin(params, args) {
       const logoutDec = timeToDec(existingLogoutTime);
       
       if (loginDec > logoutDec) {
-        return sendEphemeralResponse(`⚠️ *Invalid Time!* Your login time (*${targetTime}*) cannot be later than your existing logout time (*${existingLogoutTime}*). Please use \`/login --replace true --time HH:MM\`.`);
+        return sendEphemeralResponse(`⚠️ *Invalid Time!* Your login time (*${targetTime}*) cannot be later than your existing logout time (*${existingLogoutTime}*). Please use \`/login --replace --time HH:MM\`.`);
       }
     }
 
@@ -274,7 +276,7 @@ function handleLogout(params, args) {
   // EXCEPTION FIX: PRIOR DATE STRICT REPLACEMENT
   // =================================================================
   if (targetDate < todayStr && !isReplaced) {
-    return sendEphemeralResponse(`⚠️ *Missing Replace Flag!* You are trying to log out for a past date (*${targetDate}*). You must use the \`--replace true\` flag to authorize modifying prior attendance.\nExample: \`/logout --date ${targetDate} --replace true --time HH:MM\``);
+    return sendEphemeralResponse(`⚠️ *Missing Replace Flag!* You are trying to log out for a past date (*${targetDate}*). You must use the \`--replace\` flag to authorize modifying prior attendance.\nExample: \`/logout --date ${targetDate} --replace --time HH:MM\``);
   }
 
   const data = sheet.getDataRange().getDisplayValues();
@@ -312,14 +314,14 @@ function handleLogout(params, args) {
   const existingLogoutTime = String(data[foundRow - 1][8]).trim(); // Column I
 
   if (existingLogoutTime !== "" && !isReplaced) {
-    return sendEphemeralResponse(`⚠️ *Already Logged Out!* You checked out at *${existingLogoutTime}*. To overwrite, use the \`--replace true\` flag.`);
+    return sendEphemeralResponse(`⚠️ *Already Logged Out!* You checked out at *${existingLogoutTime}*. To overwrite, use the \`--replace\` flag.`);
   }
 
   const loginDec = timeToDec(loginTime);
   const targetLogoutDec = timeToDec(targetTime);
 
   if (targetLogoutDec < loginDec) {
-    return sendEphemeralResponse(`⚠️ *Invalid Time!* Your logout time (*${targetTime}*) cannot be earlier than your login time (*${loginTime}*). Please use \`/logout --replace true --time HH:MM\`.`);
+    return sendEphemeralResponse(`⚠️ *Invalid Time!* Your logout time (*${targetTime}*) cannot be earlier than your login time (*${loginTime}*). Please use \`/logout --replace --time HH:MM\`.`);
   }
 
   const diffHours = calcDecimalHours24(loginTime, targetTime);
@@ -527,7 +529,7 @@ function handleLeave(params, args) {
 
   const requestedDates = [];
   
-  // Validate every requested date before writing anything to the sheet
+  // Validate every requested date before writing anything
   for (let d = new Date(fromDate); d <= toDate; d.setDate(d.getDate() + 1)) {
     const loopDateStr = Utilities.formatDate(d, "GMT+5", "yyyy-MM-dd");
     
@@ -539,9 +541,12 @@ function handleLeave(params, args) {
 
   const actualTimestamp = Utilities.formatDate(new Date(), "GMT+5", "yyyy-MM-dd HH:mm:ss");
 
-  // If validation passes, generate rows
-  requestedDates.forEach(dateStr => {
-    sheet.appendRow([
+  // =================================================================
+  // EXCEPTION FIX: THE 3-SECOND TIMEOUT TRAP (BATCH WRITING)
+  // =================================================================
+  if (requestedDates.length > 0) {
+    // 1. Build the 2D Array in memory (Lightning fast)
+    const rowsToInsert = requestedDates.map(dateStr => [
       "=ROW()-1", 
       dateStr, 
       userName, 
@@ -551,7 +556,14 @@ function handleLeave(params, args) {
       type, 
       userId
     ]);
-  });
+
+    // 2. Execute ONE API call to write the entire block instantly
+    const lastRow = sheet.getLastRow();
+    const numRows = rowsToInsert.length;
+    const numCols = rowsToInsert[0].length;
+    
+    sheet.getRange(lastRow + 1, 1, numRows, numCols).setValues(rowsToInsert);
+  }
 
   return sendEphemeralResponse(`✅ *Leave Logged!* Successfully applied for *${validTypes[type]}* from *${fromDateStr}* to *${toDateStr}* (${requestedDates.length} day/s).`);
 }
