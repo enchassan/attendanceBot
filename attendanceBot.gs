@@ -1,5 +1,3 @@
-const TIMEZONE = "GMT+5";
-
 // =================================================================
 // SPRINT 1: CORE ROUTER & PARSER
 // =================================================================
@@ -134,61 +132,88 @@ function handleLogin(params, args) {
   const targetDate = resolveDate(args.date);
   const targetTime = resolveTime(args.time);
   
-  // Convert text args to proper booleans or clean strings
   const isReplaced = (args.replace === "true" || args.replace === true);
   const isWfh = (args.wfh === "true" || args.wfh === true);
   const reason = args.reason || "";
   
   const actualTimestamp = Utilities.formatDate(new Date(), "GMT+5", "yyyy-MM-dd HH:mm:ss");
+  const todayStr = actualTimestamp.split(" ")[0]; // Extracts just the YYYY-MM-DD part
   
+  // =================================================================
+  // EXCEPTION FIX: PRIOR DATE STRICT REPLACEMENT
+  // =================================================================
+  if (targetDate < todayStr && !isReplaced) {
+    return sendEphemeralResponse(`⚠️ *Missing Replace Flag!* You are trying to log attendance for a past date (*${targetDate}*). You must use the \`--replace true\` flag to authorize logging prior attendance.\nExample: \`/login --date ${targetDate} --replace true --time HH:MM\``);
+  }
+
   const data = sheet.getDataRange().getDisplayValues();
   let foundRow = -1;
 
-  // Search backwards to find an existing record for this user on the target date
   for (let i = data.length - 1; i >= 1; i--) {
     const rowDate = String(data[i][1]).trim();
     const rowSlackId = String(data[i][15]).trim(); // Column P
     if (rowDate === targetDate && rowSlackId === userId) {
-      foundRow = i + 1; // 1-based index for Sheets
+      foundRow = i + 1; 
       break;
     }
   }
 
   if (foundRow !== -1) {
     const existingLoginTime = String(data[foundRow - 1][3]).trim(); // Column D
+    const existingLogoutTime = String(data[foundRow - 1][8]).trim(); // Column I
     
-    // If they already logged in and aren't forcing an overwrite
+    // Prevent duplicate logins without --replace
     if (existingLoginTime !== "" && !isReplaced) {
       return sendEphemeralResponse(`⚠️ *Already Logged In!* You checked in at *${existingLoginTime}*. If you are trying to overwrite this, you must use the \`--replace true\` flag.`);
     }
 
-    // Process Overwrite / Replace
+    // VALIDATION FIX: Prevent login time > logout time
+    if (existingLogoutTime !== "") {
+      const loginDec = timeToDec(targetTime);
+      const logoutDec = timeToDec(existingLogoutTime);
+      
+      if (loginDec > logoutDec) {
+        return sendEphemeralResponse(`⚠️ *Invalid Time!* Your login time (*${targetTime}*) cannot be later than your existing logout time (*${existingLogoutTime}*). Please use \`/login --replace true --time HH:MM\`.`);
+      }
+    }
+
+    // Process Overwrite / Replace for Login Data
     sheet.getRange(foundRow, 4).setValue(`'${targetTime}`);       // D: Login Time
-    sheet.getRange(foundRow, 5).setValue(isReplaced);             // E: Replaced?
-    sheet.getRange(foundRow, 6).setValue(actualTimestamp);        // F: Actual Action
-    sheet.getRange(foundRow, 7).setValue(reason);                 // G: Reason
-    sheet.getRange(foundRow, 8).setValue(isWfh);                  // H: WFH?
+    sheet.getRange(foundRow, 5).setValue(isReplaced);             // E: Login Replaced?
+    sheet.getRange(foundRow, 6).setValue(actualTimestamp);        // F: Login Actual Action
+    sheet.getRange(foundRow, 7).setValue(reason);                 // G: Late Login Reason
+    sheet.getRange(foundRow, 8).setValue(isWfh);                  // H: Work From Home?
     
+    // RECALCULATION FIX: If they had a "Missing In" record, calculate the hours now
+    if (existingLogoutTime !== "") {
+      const diffHours = calcDecimalHours24(targetTime, existingLogoutTime);
+      const totalHoursFormatted = Number(diffHours.toFixed(2));
+      const status = totalHoursFormatted >= 8.5 ? "Full Day 🟢" : "Half Day 🟡";
+
+      sheet.getRange(foundRow, 13).setValue(totalHoursFormatted); // M: Total Hours
+      sheet.getRange(foundRow, 14).setValue(status);              // N: Status
+
+      return sendEphemeralResponse(`⚠️ *Attendance Recovered:* Your login for *${targetDate}* is set to *${targetTime}*. Since you already logged out at *${existingLogoutTime}*, your total hours are now *${totalHoursFormatted} hrs* (${status}).`);
+    }
+
     return sendEphemeralResponse(`⚠️ *Attendance Overwritten:* Your login for *${targetDate}* is now updated to *${targetTime}*.\n*Note:* This overwrite has been flagged for HR review.`);
   }
 
   // Create a brand new record
-  // Columns: A=Sr#, B=Date, C=Name, D=Login, E=LoginReplaced, F=LoginActual, G=LoginReason, H=WFH, I..O=Empty, P=SlackID
   sheet.appendRow([
-    "=ROW()-1", 
-    targetDate, 
-    userName, 
-    `'${targetTime}`, 
-    isReplaced, 
-    isReplaced ? actualTimestamp : actualTimestamp, // We log actual action time regardless for safety, but HR looks at the E flag
-    reason, 
-    isWfh, 
-    "", "", "", "", "", "In Progress ⏳", "", 
-    userId
+    "=ROW()-1", targetDate, userName, `'${targetTime}`, isReplaced, 
+    actualTimestamp, reason, isWfh, "", "", "", "", "", "In Progress ⏳", "", userId
   ]);
 
   const wfhText = isWfh ? " 🏠 *(Working From Home)*" : "";
   return sendEphemeralResponse(`✅ Successfully *Logged In 🟢* at *${targetTime}* for *${targetDate}*${wfhText}.\n📝 *Reason:* ${reason || "None"}`);
+}
+
+// Small helper function specifically for the time validation check
+function timeToDec(t) {
+  const parts = String(t).split(":");
+  if (parts.length !== 2) return 0;
+  return parseInt(parts[0], 10) + (parseInt(parts[1], 10) / 60);
 }
 
 function handleLogout(params, args) {
@@ -203,7 +228,15 @@ function handleLogout(params, args) {
   const isReplaced = (args.replace === "true" || args.replace === true);
   const reason = args.reason || "";
   const actualTimestamp = Utilities.formatDate(new Date(), "GMT+5", "yyyy-MM-dd HH:mm:ss");
+  const todayStr = actualTimestamp.split(" ")[0]; 
   
+  // =================================================================
+  // EXCEPTION FIX: PRIOR DATE STRICT REPLACEMENT
+  // =================================================================
+  if (targetDate < todayStr && !isReplaced) {
+    return sendEphemeralResponse(`⚠️ *Missing Replace Flag!* You are trying to log out for a past date (*${targetDate}*). You must use the \`--replace true\` flag to authorize modifying prior attendance.\nExample: \`/logout --date ${targetDate} --replace true --time HH:MM\``);
+  }
+
   const data = sheet.getDataRange().getDisplayValues();
   let foundRow = -1;
   let loginTime = "";
@@ -218,7 +251,6 @@ function handleLogout(params, args) {
     }
   }
 
-  // Handle scenario where they forgot to log in entirely
   if (foundRow === -1 || !loginTime) {
     sheet.appendRow([
       "=ROW()-1", targetDate, userName, "", false, "", "", false,
@@ -233,18 +265,24 @@ function handleLogout(params, args) {
     return sendEphemeralResponse(`⚠️ *Already Logged Out!* You checked out at *${existingLogoutTime}*. To overwrite, use the \`--replace true\` flag.`);
   }
 
-  // Calculate total hours
+  // EXCEPTION FIX: Prevent logout time < login time on the same date
+  const loginDec = timeToDec(loginTime);
+  const targetLogoutDec = timeToDec(targetTime);
+
+  if (targetLogoutDec < loginDec) {
+    return sendEphemeralResponse(`⚠️ *Invalid Time!* Your logout time (*${targetTime}*) cannot be earlier than your login time (*${loginTime}*). Please use \`/logout --replace true --time HH:MM\`.`);
+  }
+
   const diffHours = calcDecimalHours24(loginTime, targetTime);
   const totalHoursFormatted = Number(diffHours.toFixed(2));
   const status = totalHoursFormatted >= 8.5 ? "Full Day 🟢" : "Half Day 🟡";
 
-  // Update existing row
-  sheet.getRange(foundRow, 9).setValue(`'${targetTime}`);          // I: Logout Time
-  sheet.getRange(foundRow, 10).setValue(isReplaced);               // J: Logout Replaced?
-  sheet.getRange(foundRow, 11).setValue(actualTimestamp);          // K: Logout Actual Action
-  sheet.getRange(foundRow, 12).setValue(reason);                   // L: Logout Reason
-  sheet.getRange(foundRow, 13).setValue(totalHoursFormatted);      // M: Total Hours
-  sheet.getRange(foundRow, 14).setValue(status);                   // N: Status
+  sheet.getRange(foundRow, 9).setValue(`'${targetTime}`);          
+  sheet.getRange(foundRow, 10).setValue(isReplaced);               
+  sheet.getRange(foundRow, 11).setValue(actualTimestamp);          
+  sheet.getRange(foundRow, 12).setValue(reason);                   
+  sheet.getRange(foundRow, 13).setValue(totalHoursFormatted);      
+  sheet.getRange(foundRow, 14).setValue(status);                   
 
   if (isReplaced) {
     return sendEphemeralResponse(`⚠️ *Logout Overwritten:* Your logout for *${targetDate}* is now *${targetTime}*. Total logged: ${totalHoursFormatted} hrs.\n*Note:* Overwrite flagged for HR review.`);
