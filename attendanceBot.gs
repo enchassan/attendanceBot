@@ -7,14 +7,29 @@ const TIMEZONE = "GMT+5";
 // =================================================================
 
 function doPost(e) {
+  // 1. Initialize the Google Apps Script Lock
+  const lock = LockService.getScriptLock();
+  
   try {
+    // 2. Try to acquire the lock for 2500ms (2.5 seconds)
+    // This leaves 0.5s to send a safe message back before Slack's 3-second timeout limit
+    if (!lock.tryLock(2500)) {
+      return sendEphemeralResponse("⏳ *Traffic Jam:* Too many people are punching in at this exact millisecond! Please try again in a few seconds.");
+    }
+
     if (e.parameter.payload) {
       // Interactive payload handling (for future button clicks/approvals)
       return ContentService.createTextOutput(""); 
     }
+    
+    // 3. If the lock is secured, route the command safely
     return handleCommandRouter(e.parameter);
+    
   } catch (error) {
-    return sendEphemeralResponse("❌ *System Error:* " + error.toString()); 
+    return sendEphemeralResponse("❌ *System Error:* " + error.toString());
+  } finally {
+    // 4. CRITICAL: Always release the lock so the next person in line can execute
+    lock.releaseLock();
   }
 }
 
