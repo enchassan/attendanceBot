@@ -7,28 +7,24 @@ const TIMEZONE = "GMT+5";
 // =================================================================
 
 function doPost(e) {
-  // 1. Initialize the Google Apps Script Lock
   const lock = LockService.getScriptLock();
   
   try {
-    // 2. Try to acquire the lock for 2500ms (2.5 seconds)
-    // This leaves 0.5s to send a safe message back before Slack's 3-second timeout limit
-    if (!lock.tryLock(2500)) {
-      return sendEphemeralResponse("⏳ *Traffic Jam:* Too many people are punching in at this exact millisecond! Please try again in a few seconds.");
+    // Reduce lock wait time to 1000ms (1 second) so it fails fast 
+    // and sends an instant response back before Slack times out.
+    if (!lock.tryLock(1000)) {
+      return sendEphemeralResponse("⏳ *Just a second:* Another punch-in is being processed. Please hit enter to try again!");
     }
 
     if (e.parameter.payload) {
-      // Interactive payload handling (for future button clicks/approvals)
       return ContentService.createTextOutput(""); 
     }
     
-    // 3. If the lock is secured, route the command safely
     return handleCommandRouter(e.parameter);
     
   } catch (error) {
     return sendEphemeralResponse("❌ *System Error:* " + error.toString());
   } finally {
-    // 4. CRITICAL: Always release the lock so the next person in line can execute
     lock.releaseLock();
   }
 }
@@ -625,4 +621,22 @@ function handleHelp(params, args) {
     "`/leave-req`\n" +
     "`/help`\n\n" +
     "_Type `/help --/[command]` to see specific parameters (e.g., `/help --/leave-req`)._");
+}
+
+function sortAttendanceSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Attendance");
+  
+  // Grab all data excluding the header row (Row 1)
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  
+  if (lastRow <= 2) return; // Nothing to sort if empty or only 1 row
+  
+  // Sort primarily by Date (Column B / index 2) in ascending order (true)
+  // Secondarily by Employee Name (Column C / index 3)
+  sheet.getRange(2, 1, lastRow - 1, lastCol).sort([
+    { column: 2, ascending: true }, 
+    { column: 3, ascending: true }
+  ]);
 }
