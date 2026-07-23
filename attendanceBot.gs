@@ -10,7 +10,7 @@ function doPost(e) {
     }
     return handleCommandRouter(e.parameter);
   } catch (error) {
-    return sendEphemeralResponse("❌ *System Error:* " + error.toString());
+    return sendEphemeralResponse("❌ *System Error:* " + error.toString()); 
   }
 }
 
@@ -140,6 +140,13 @@ function handleLogin(params, args) {
   const todayStr = actualTimestamp.split(" ")[0]; // Extracts just the YYYY-MM-DD part
   
   // =================================================================
+  // EXCEPTION FIX: FUTURE TIME TRAVEL BLOCK
+  // =================================================================
+  if (targetDate > todayStr) {
+    return sendEphemeralResponse(`⚠️ *Future Date Blocked!* You cannot log attendance for upcoming days (*${targetDate}*).`);
+  }
+
+  // =================================================================
   // EXCEPTION FIX: PRIOR DATE STRICT REPLACEMENT
   // =================================================================
   if (targetDate < todayStr && !isReplaced) {
@@ -230,6 +237,13 @@ function handleLogout(params, args) {
   const actualTimestamp = Utilities.formatDate(new Date(), "GMT+5", "yyyy-MM-dd HH:mm:ss");
   const todayStr = actualTimestamp.split(" ")[0]; 
   
+  // =================================================================
+  // EXCEPTION FIX: FUTURE TIME TRAVEL BLOCK
+  // =================================================================
+  if (targetDate > todayStr) {
+    return sendEphemeralResponse(`⚠️ *Future Date Blocked!* You cannot log out for upcoming days (*${targetDate}*).`);
+  }
+
   // =================================================================
   // EXCEPTION FIX: PRIOR DATE STRICT REPLACEMENT
   // =================================================================
