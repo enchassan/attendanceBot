@@ -1,3 +1,5 @@
+const TIMEZONE = "GMT+5";
+
 // =================================================================
 // SPRINT 1: CORE ROUTER & PARSER
 // =================================================================
@@ -137,7 +139,7 @@ function handleLogin(params, args) {
   const reason = args.reason || "";
   
   const actualTimestamp = Utilities.formatDate(new Date(), "GMT+5", "yyyy-MM-dd HH:mm:ss");
-  const todayStr = actualTimestamp.split(" ")[0]; // Extracts just the YYYY-MM-DD part
+  const todayStr = actualTimestamp.split(" ")[0]; 
   
   // =================================================================
   // EXCEPTION FIX: FUTURE TIME TRAVEL BLOCK
@@ -166,6 +168,14 @@ function handleLogin(params, args) {
   }
 
   if (foundRow !== -1) {
+    // =================================================================
+    // EXCEPTION FIX: LEAVE COLLISION (PREVENT CANNIBALIZING LEAVE)
+    // =================================================================
+    const existingStatus = String(data[foundRow - 1][13]).trim(); // Column N
+    if (existingStatus.includes("On Leave")) {
+      return sendEphemeralResponse(`⚠️ *Leave Collision!* You have an approved leave scheduled for *${targetDate}*. You cannot log attendance on a leave day. If this is a mistake, contact HR.`);
+    }
+
     const existingLoginTime = String(data[foundRow - 1][3]).trim(); // Column D
     const existingLogoutTime = String(data[foundRow - 1][8]).trim(); // Column I
     
@@ -185,11 +195,11 @@ function handleLogin(params, args) {
     }
 
     // Process Overwrite / Replace for Login Data
-    sheet.getRange(foundRow, 4).setValue(`'${targetTime}`);       // D: Login Time
-    sheet.getRange(foundRow, 5).setValue(isReplaced);             // E: Login Replaced?
-    sheet.getRange(foundRow, 6).setValue(actualTimestamp);        // F: Login Actual Action
-    sheet.getRange(foundRow, 7).setValue(reason);                 // G: Late Login Reason
-    sheet.getRange(foundRow, 8).setValue(isWfh);                  // H: Work From Home?
+    sheet.getRange(foundRow, 4).setValue(`'${targetTime}`);       
+    sheet.getRange(foundRow, 5).setValue(isReplaced);             
+    sheet.getRange(foundRow, 6).setValue(actualTimestamp);        
+    sheet.getRange(foundRow, 7).setValue(reason);                 
+    sheet.getRange(foundRow, 8).setValue(isWfh);                  
     
     // RECALCULATION FIX: If they had a "Missing In" record, calculate the hours now
     if (existingLogoutTime !== "") {
@@ -197,8 +207,8 @@ function handleLogin(params, args) {
       const totalHoursFormatted = Number(diffHours.toFixed(2));
       const status = totalHoursFormatted >= 8.5 ? "Full Day 🟢" : "Half Day 🟡";
 
-      sheet.getRange(foundRow, 13).setValue(totalHoursFormatted); // M: Total Hours
-      sheet.getRange(foundRow, 14).setValue(status);              // N: Status
+      sheet.getRange(foundRow, 13).setValue(totalHoursFormatted); 
+      sheet.getRange(foundRow, 14).setValue(status);              
 
       return sendEphemeralResponse(`⚠️ *Attendance Recovered:* Your login for *${targetDate}* is set to *${targetTime}*. Since you already logged out at *${existingLogoutTime}*, your total hours are now *${totalHoursFormatted} hrs* (${status}).`);
     }
@@ -237,16 +247,10 @@ function handleLogout(params, args) {
   const actualTimestamp = Utilities.formatDate(new Date(), "GMT+5", "yyyy-MM-dd HH:mm:ss");
   const todayStr = actualTimestamp.split(" ")[0]; 
   
-  // =================================================================
-  // EXCEPTION FIX: FUTURE TIME TRAVEL BLOCK
-  // =================================================================
   if (targetDate > todayStr) {
     return sendEphemeralResponse(`⚠️ *Future Date Blocked!* You cannot log out for upcoming days (*${targetDate}*).`);
   }
 
-  // =================================================================
-  // EXCEPTION FIX: PRIOR DATE STRICT REPLACEMENT
-  // =================================================================
   if (targetDate < todayStr && !isReplaced) {
     return sendEphemeralResponse(`⚠️ *Missing Replace Flag!* You are trying to log out for a past date (*${targetDate}*). You must use the \`--replace true\` flag to authorize modifying prior attendance.\nExample: \`/logout --date ${targetDate} --replace true --time HH:MM\``);
   }
@@ -265,6 +269,16 @@ function handleLogout(params, args) {
     }
   }
 
+  if (foundRow !== -1) {
+    // =================================================================
+    // EXCEPTION FIX: LEAVE COLLISION
+    // =================================================================
+    const existingStatus = String(data[foundRow - 1][13]).trim(); 
+    if (existingStatus.includes("On Leave")) {
+      return sendEphemeralResponse(`⚠️ *Leave Collision!* You have an approved leave scheduled for *${targetDate}*. You cannot log out on a leave day.`);
+    }
+  }
+
   if (foundRow === -1 || !loginTime) {
     sheet.appendRow([
       "=ROW()-1", targetDate, userName, "", false, "", "", false,
@@ -279,7 +293,6 @@ function handleLogout(params, args) {
     return sendEphemeralResponse(`⚠️ *Already Logged Out!* You checked out at *${existingLogoutTime}*. To overwrite, use the \`--replace true\` flag.`);
   }
 
-  // EXCEPTION FIX: Prevent logout time < login time on the same date
   const loginDec = timeToDec(loginTime);
   const targetLogoutDec = timeToDec(targetTime);
 
@@ -477,17 +490,38 @@ function handleLeave(params, args) {
     return sendEphemeralResponse("⚠️ *Invalid Date Range!* The `--from` date cannot be after the `--to` date.");
   }
 
-  const actualTimestamp = Utilities.formatDate(new Date(), "GMT+5", "yyyy-MM-dd HH:mm:ss");
-  let appliedDays = 0;
+  // =================================================================
+  // EXCEPTION FIX: DUPLICATE & COLLISION PREVENTION
+  // =================================================================
+  const data = sheet.getDataRange().getDisplayValues();
+  const existingUserDates = new Set();
+  
+  // Extract all dates this specific user already has a record for
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][15]).trim() === userId) {
+      existingUserDates.add(String(data[i][1]).trim());
+    }
+  }
 
-  // Loop through the date range and generate a row for each leave day
+  const requestedDates = [];
+  
+  // Validate every requested date before writing anything to the sheet
   for (let d = new Date(fromDate); d <= toDate; d.setDate(d.getDate() + 1)) {
     const loopDateStr = Utilities.formatDate(d, "GMT+5", "yyyy-MM-dd");
     
-    // Columns: A=Sr#, B=Date, C=Name, D=Login..M=TotalHrs, N=Status, O=LeaveCode, P=SlackID
+    if (existingUserDates.has(loopDateStr)) {
+      return sendEphemeralResponse(`⚠️ *Collision Detected!* You already have an attendance or leave record for *${loopDateStr}*. You cannot apply for leave over an existing record.`);
+    }
+    requestedDates.push(loopDateStr);
+  }
+
+  const actualTimestamp = Utilities.formatDate(new Date(), "GMT+5", "yyyy-MM-dd HH:mm:ss");
+
+  // If validation passes, generate rows
+  requestedDates.forEach(dateStr => {
     sheet.appendRow([
       "=ROW()-1", 
-      loopDateStr, 
+      dateStr, 
       userName, 
       "", "", actualTimestamp, "", false, 
       "", "", "", "", 0, 
@@ -495,10 +529,9 @@ function handleLeave(params, args) {
       type, 
       userId
     ]);
-    appliedDays++;
-  }
+  });
 
-  return sendEphemeralResponse(`✅ *Leave Logged!* Successfully applied for *${validTypes[type]}* from *${fromDateStr}* to *${toDateStr}* (${appliedDays} day/s).`);
+  return sendEphemeralResponse(`✅ *Leave Logged!* Successfully applied for *${validTypes[type]}* from *${fromDateStr}* to *${toDateStr}* (${requestedDates.length} day/s).`);
 }
 
 function handleHelp(params, args) {
