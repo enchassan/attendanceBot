@@ -149,6 +149,14 @@ function handleLogin(params, args) {
   }
 
   // =================================================================
+  // EXCEPTION FIX: EXTREME RELATIVE LOGGING BOUNDARY (3 DAYS)
+  // =================================================================
+  const diffDays = (new Date(todayStr) - new Date(targetDate)) / (1000 * 60 * 60 * 24);
+  if (diffDays > 3) {
+    return sendEphemeralResponse(`⚠️ *Boundary Limit Exceeded!* You cannot add or modify attendance records older than 3 days (*${targetDate}*). Please contact HR for manual adjustments.`);
+  }
+
+  // =================================================================
   // EXCEPTION FIX: PRIOR DATE STRICT REPLACEMENT
   // =================================================================
   if (targetDate < todayStr && !isReplaced) {
@@ -169,9 +177,9 @@ function handleLogin(params, args) {
 
   if (foundRow !== -1) {
     // =================================================================
-    // EXCEPTION FIX: LEAVE COLLISION (PREVENT CANNIBALIZING LEAVE)
+    // EXCEPTION FIX: LEAVE COLLISION
     // =================================================================
-    const existingStatus = String(data[foundRow - 1][13]).trim(); // Column N
+    const existingStatus = String(data[foundRow - 1][13]).trim(); 
     if (existingStatus.includes("On Leave")) {
       return sendEphemeralResponse(`⚠️ *Leave Collision!* You have an approved leave scheduled for *${targetDate}*. You cannot log attendance on a leave day. If this is a mistake, contact HR.`);
     }
@@ -247,10 +255,24 @@ function handleLogout(params, args) {
   const actualTimestamp = Utilities.formatDate(new Date(), "GMT+5", "yyyy-MM-dd HH:mm:ss");
   const todayStr = actualTimestamp.split(" ")[0]; 
   
+  // =================================================================
+  // EXCEPTION FIX: FUTURE TIME TRAVEL BLOCK
+  // =================================================================
   if (targetDate > todayStr) {
     return sendEphemeralResponse(`⚠️ *Future Date Blocked!* You cannot log out for upcoming days (*${targetDate}*).`);
   }
 
+  // =================================================================
+  // EXCEPTION FIX: EXTREME RELATIVE LOGGING BOUNDARY (3 DAYS)
+  // =================================================================
+  const diffDays = (new Date(todayStr) - new Date(targetDate)) / (1000 * 60 * 60 * 24);
+  if (diffDays > 3) {
+    return sendEphemeralResponse(`⚠️ *Boundary Limit Exceeded!* You cannot add or modify attendance records older than 3 days (*${targetDate}*). Please contact HR for manual adjustments.`);
+  }
+
+  // =================================================================
+  // EXCEPTION FIX: PRIOR DATE STRICT REPLACEMENT
+  // =================================================================
   if (targetDate < todayStr && !isReplaced) {
     return sendEphemeralResponse(`⚠️ *Missing Replace Flag!* You are trying to log out for a past date (*${targetDate}*). You must use the \`--replace true\` flag to authorize modifying prior attendance.\nExample: \`/logout --date ${targetDate} --replace true --time HH:MM\``);
   }
