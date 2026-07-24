@@ -202,7 +202,13 @@ function handleLogin(params, args) {
     return sendEphemeralResponse(`⚠️ *Missing Replace Flag!* You are trying to log attendance for a past date (*${targetDate}*). You must use the \`--replace\` flag to authorize logging prior attendance.\nExample: \`/login --date ${targetDate} --replace --time HH:MM\``);
   }
 
-  const data = sheet.getDataRange().getDisplayValues();
+  // =================================================================
+  // EXCEPTION FIX: DATA SCALING SLOWDOWN (MEMORY OPTIMIZATION)
+  // =================================================================
+  const lastRow = sheet.getLastRow();
+  
+  // Strictly bound the fetch to our 16 columns and grab raw data for speed
+  const data = lastRow > 0 ? sheet.getRange(1, 1, lastRow, 16).getValues() : [];
   let foundRow = -1;
 
   for (let i = data.length - 1; i >= 1; i--) {
@@ -319,7 +325,13 @@ function handleLogout(params, args) {
     return sendEphemeralResponse(`⚠️ *Missing Replace Flag!* You are trying to log out for a past date (*${targetDate}*). You must use the \`--replace\` flag to authorize modifying prior attendance.\nExample: \`/logout --date ${targetDate} --replace --time HH:MM\``);
   }
 
-  const data = sheet.getDataRange().getDisplayValues();
+  // =================================================================
+  // EXCEPTION FIX: DATA SCALING SLOWDOWN (MEMORY OPTIMIZATION)
+  // =================================================================
+  const lastRow = sheet.getLastRow();
+  
+  // Strictly bound the fetch to our 16 columns and grab raw data for speed
+  const data = lastRow > 0 ? sheet.getRange(1, 1, lastRow, 16).getValues() : [];
   let foundRow = -1;
   let loginTime = "";
 
@@ -451,13 +463,24 @@ function handleAttendance(params, args) {
   }
 
   // 2. Fetch the data
-  const data = sheet.getDataRange().getDisplayValues();
+  // =================================================================
+  // EXCEPTION FIX: DATA SCALING SLOWDOWN (MEMORY OPTIMIZATION)
+  // =================================================================
+  const lastRow = sheet.getLastRow();
+  
+  // Strictly bound the fetch to our 16 columns and grab raw data for speed
+  const data = lastRow > 0 ? sheet.getRange(1, 1, lastRow, 16).getValues() : [];
   let results = [];
 
   // We loop forward for monthly reports so the dates are in chronological order
   for (let i = 1; i < data.length; i++) {
     const rowSlackId = String(data[i][15]).trim(); // Column P
-    const rowDateStr = String(data[i][1]).trim();  // Column B (YYYY-MM-DD)
+    let rowDateStr = "";
+  if (data[i][1] instanceof Date) {
+    rowDateStr = Utilities.formatDate(data[i][1], "GMT+5", "yyyy-MM-dd");
+  } else {
+    rowDateStr = String(data[i][1]).trim(); // Fallback just in case it's literal text
+  }  // Column B 
     
     if (rowSlackId !== userId || !rowDateStr) continue;
 
@@ -466,10 +489,15 @@ function handleAttendance(params, args) {
         results.push(data[i]);
       }
     } else if (targetMonth !== null) {
-      const parts = rowDateStr.split('-');
-      if (parts.length === 3) {
-        const rowYear = parseInt(parts[0], 10);
-        const rowMonth = parseInt(parts[1], 10);
+      // =================================================================
+      // EXCEPTION FIX: STRICT DATE FORMAT RELIANCE
+      // =================================================================
+      const rowDateObj = new Date(rowDateStr);
+      
+      // Ensure the cell actually contains a valid date to prevent NaN crashes
+      if (!isNaN(rowDateObj.getTime())) {
+        const rowYear = rowDateObj.getFullYear();
+        const rowMonth = rowDateObj.getMonth() + 1; // 0-indexed, so add 1
         
         if (rowYear === currentYear && rowMonth === targetMonth) {
           results.push(data[i]);
@@ -523,7 +551,6 @@ function handleAttendance(params, args) {
 
   return sendEphemeralResponse(textResponse);
 }
-
 // =================================================================
 // SPRINT 4: /LEAVE & /HELP COMMANDS
 // =================================================================
@@ -567,7 +594,13 @@ function handleLeave(params, args) {
   // =================================================================
   // EXCEPTION FIX: DUPLICATE & COLLISION PREVENTION
   // =================================================================
-  const data = sheet.getDataRange().getDisplayValues();
+  // =================================================================
+  // EXCEPTION FIX: DATA SCALING SLOWDOWN (MEMORY OPTIMIZATION)
+  // =================================================================
+  const lastRow = sheet.getLastRow();
+  
+  // Strictly bound the fetch to our 16 columns and grab raw data for speed
+  const data = lastRow > 0 ? sheet.getRange(1, 1, lastRow, 16).getValues() : [];
   const existingUserDates = new Set();
   
   // Extract all dates this specific user already has a record for
