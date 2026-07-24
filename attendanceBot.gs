@@ -431,12 +431,13 @@ function handleAttendance(params, args) {
   const userId = params.user_id;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Attendance");
+  const sheetTz = ss.getSpreadsheetTimeZone();
   
   // Get current date constraints
   const now = new Date();
-  const currentYear = parseInt(Utilities.formatDate(now, "GMT+5", "yyyy"), 10);
-  const currentMonth = parseInt(Utilities.formatDate(now, "GMT+5", "MM"), 10);
-  const todayString = Utilities.formatDate(now, "GMT+5", "yyyy-MM-dd");
+  const currentYear = parseInt(Utilities.formatDate(now, sheetTz, "yyyy"), 10);
+  const currentMonth = parseInt(Utilities.formatDate(now, sheetTz, "MM"), 10);
+  const todayString = Utilities.formatDate(now, sheetTz, "yyyy-MM-dd");
 
   const isTodayMode = args.today_flag === true;
   let targetMonth = null;
@@ -459,25 +460,21 @@ function handleAttendance(params, args) {
     return sendEphemeralResponse("⚠️ *Missing Parameters:* Please specify what you want to check.\nUse `/attendance --[=]` for today, or `/attendance --month =` for this month.");
   }
 
-  // 2. Fetch the data
-  // =================================================================
-  // EXCEPTION FIX: DATA SCALING SLOWDOWN (MEMORY OPTIMIZATION)
-  // =================================================================
+  // 2. Fetch the data using memory optimization
   const lastRow = sheet.getLastRow();
-  
-  // Strictly bound the fetch to our 16 columns and grab raw data for speed
   const data = lastRow > 0 ? sheet.getRange(1, 1, lastRow, 16).getValues() : [];
   let results = [];
 
   // We loop forward for monthly reports so the dates are in chronological order
   for (let i = 1; i < data.length; i++) {
     const rowSlackId = String(data[i][15]).trim(); // Column P
+    
     let rowDateStr = "";
-  if (data[i][1] instanceof Date) {
-    rowDateStr = Utilities.formatDate(data[i][1], "GMT+5", "yyyy-MM-dd");
-  } else {
-    rowDateStr = String(data[i][1]).trim(); // Fallback just in case it's literal text
-  }  // Column B 
+    if (data[i][1] instanceof Date) {
+      rowDateStr = Utilities.formatDate(data[i][1], sheetTz, "yyyy-MM-dd");
+    } else {
+      rowDateStr = String(data[i][1]).trim();
+    }
     
     if (rowSlackId !== userId || !rowDateStr) continue;
 
@@ -486,12 +483,8 @@ function handleAttendance(params, args) {
         results.push(data[i]);
       }
     } else if (targetMonth !== null) {
-      // =================================================================
-      // EXCEPTION FIX: STRICT DATE FORMAT RELIANCE
-      // =================================================================
       const rowDateObj = new Date(rowDateStr);
       
-      // Ensure the cell actually contains a valid date to prevent NaN crashes
       if (!isNaN(rowDateObj.getTime())) {
         const rowYear = rowDateObj.getFullYear();
         const rowMonth = rowDateObj.getMonth() + 1; // 0-indexed, so add 1
@@ -502,6 +495,15 @@ function handleAttendance(params, args) {
       }
     }
   }
+
+  // Helper to cleanly parse time cells whether they are Date objects or strings
+  const parseTimeVal = (val) => {
+    if (!val) return "";
+    if (val instanceof Date) {
+      return Utilities.formatDate(val, sheetTz, "HH:mm");
+    }
+    return String(val).replace(/'/g, '').trim();
+  };
 
   // 3. Format the Slack Output
   if (results.length === 0) {
@@ -516,13 +518,16 @@ function handleAttendance(params, args) {
 
   if (isTodayMode) {
     const r = results[results.length - 1]; // In case of duplicates, grab the latest row
+    const loginTimeClean = parseTimeVal(r[3]);
+    const logoutTimeClean = parseTimeVal(r[8]);
+
     const loginReplacedText = r[4] === "TRUE" ? " _(Overwritten)_" : "";
     const logoutReplacedText = r[9] === "TRUE" ? " _(Overwritten)_" : "";
     const wfhText = r[7] === "TRUE" ? " 🏠 WFH" : "";
     
     textResponse = `📅 *Your Attendance for Today (${todayString})*\n\n` +
-                   `*Login:* ${r[3] || "Missing"}${loginReplacedText}\n` +
-                   `*Logout:* ${r[8] || "Not logged out yet"}${logoutReplacedText}\n` +
+                   `*Login:* ${loginTimeClean || "Missing"}${loginReplacedText}\n` +
+                   `*Logout:* ${logoutTimeClean || "Not logged out yet"}${logoutReplacedText}\n` +
                    `*Hours Logged:* ${r[12] || "0"}\n` +
                    `*Status:* ${r[13] || "N/A"}${wfhText}`;
   } else {
@@ -533,10 +538,15 @@ function handleAttendance(params, args) {
     textResponse += "---------------------------------------\n";
     
     results.forEach(r => {
-      // Extract MM-DD and strip Slack emojis from the status for perfect table alignment
-      const dateShort = String(r[1]).substring(5).padEnd(5); 
-      const logIn = String(r[3] || "--:--").padEnd(5);
-      const logOut = String(r[8] || "--:--").padEnd(5);
+      let dStr = "";
+      if (r[1] instanceof Date) {
+        dStr = Utilities.formatDate(r[1], sheetTz, "yyyy-MM-dd");
+      } else {
+        dStr = String(r[1]).trim();
+      }
+      const dateShort = dStr.substring(5).padEnd(5); 
+      const logIn = (parseTimeVal(r[3]) || "--:--").padEnd(5);
+      const logOut = (parseTimeVal(r[8]) || "--:--").padEnd(5);
       const hrs = String(r[12] || "-").padEnd(4);
       const status = String(r[13] || "In Progress").replace(/[^\x20-\x7E]/g, "").trim().padEnd(11); 
       
