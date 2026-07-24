@@ -533,12 +533,6 @@ function handleLeave(params, args) {
   const userName = getSlackRealName(userId) || params.user_name;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Attendance");
-  
-  const targetDate = resolveDate(args.date);
-  if (!targetDate) return sendEphemeralResponse("⚠️ *Invalid Date!* Please use `YYYY-MM-DD`, `=`, or `-n`/`+n`.");
-
-  const targetTime = resolveTime(args.time);
-  if (!targetTime) return sendEphemeralResponse("⚠️ *Invalid Time!* Please use 24-hour `HH:MM` format (e.g., 09:30, 14:00) or `=`.");
 
   const type = args.type ? String(args.type).toUpperCase() : null;
   const validTypes = {
@@ -550,9 +544,19 @@ function handleLeave(params, args) {
     return sendEphemeralResponse("⚠️ *Invalid Leave Type!* Please specify `--type` using A, A1, A2, S, S1, or S2.");
   }
 
+  // Extract inputs
   const fromDateStr = resolveDate(args.from);
   const toDateStr = args.to ? resolveDate(args.to) : fromDateStr;
 
+  // =================================================================
+  // EXCEPTION FIX: BAD STRING / INVERSION PREVENTION
+  // =================================================================
+  // If resolveDate returned null because of gibberish ("banana"), block it immediately.
+  if (!fromDateStr || !toDateStr) {
+    return sendEphemeralResponse("⚠️ *Invalid Date Format!* Please use `YYYY-MM-DD`, `=`, or `-n`/`+n` for your `--from` and `--to` parameters.");
+  }
+
+  // Now it is 100% safe to parse these into JS Date objects
   const fromDate = new Date(fromDateStr);
   const toDate = new Date(toDateStr);
 
