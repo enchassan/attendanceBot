@@ -84,8 +84,7 @@ function parseArgs(rawText) {
 }
 
 // =================================================================
-// DYNAMIC DATE & TIME RESOLVERS
-// Handles '=', '-n', '+n' based on GMT+5 (Lahore)
+// DYNAMIC DATE & TIME RESOLVERS (PATCHED)
 // =================================================================
 function resolveDate(dateInput) {
   const d = new Date();
@@ -93,14 +92,30 @@ function resolveDate(dateInput) {
     return Utilities.formatDate(d, "GMT+5", "yyyy-MM-dd");
   }
   
-  if (dateInput.startsWith("-") || dateInput.startsWith("+")) {
-    const days = parseInt(dateInput, 10);
+  const strInput = String(dateInput).trim();
+  
+  // Handle relative days (-n / +n)
+  if (strInput.startsWith("-") || strInput.startsWith("+")) {
+    const days = parseInt(strInput, 10);
+    if (isNaN(days)) return null; // Catches bad input like "-banana"
     d.setDate(d.getDate() + days);
     return Utilities.formatDate(d, "GMT+5", "yyyy-MM-dd");
   }
   
-  // Assume exact format YYYY-MM-DD
-  return dateInput;
+  // Strict YYYY-MM-DD format check
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(strInput)) return null;
+  
+  // February 30th / Invalid Calendar Day check
+  const parts = strInput.split('-');
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10) - 1; // 0-indexed for JS
+  const day = parseInt(parts[2], 10);
+  const testD = new Date(year, month, day);
+  
+  if (testD.getFullYear() === year && testD.getMonth() === month && testD.getDate() === day) {
+    return strInput;
+  }
+  return null;
 }
 
 function resolveTime(timeInput) {
@@ -108,8 +123,13 @@ function resolveTime(timeInput) {
   if (!timeInput || timeInput === "=" || timeInput === true) {
     return Utilities.formatDate(d, "GMT+5", "HH:mm");
   }
-  // Assume exact format HH:MM
-  return timeInput;
+  
+  const strInput = String(timeInput).trim();
+  
+  // Strict 24-hour format check (00:00 to 23:59)
+  if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(strInput)) return null;
+  
+  return strInput;
 }
 
 function resolveMonth(monthInput) {
@@ -138,14 +158,20 @@ function sendEphemeralResponse(text) {
 // SPRINT 2: /LOGIN & /LOGOUT WITH SPREADSHEET INTEGRATION
 // =================================================================
 
+
+
 function handleLogin(params, args) {
+  
   const userId = params.user_id;
   const userName = getSlackRealName(userId) || params.user_name;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Attendance");
   
   const targetDate = resolveDate(args.date);
+  if (!targetDate) return sendEphemeralResponse("⚠️ *Invalid Date!* Please use `YYYY-MM-DD`, `=`, or `-n`/`+n`.");
+
   const targetTime = resolveTime(args.time);
+  if (!targetTime) return sendEphemeralResponse("⚠️ *Invalid Time!* Please use 24-hour `HH:MM` format (e.g., 09:30, 14:00) or `=`.");
   
   const isReplaced = (args.replace === "true" || args.replace === true);
   const isWfh = (args.wfh === "true" || args.wfh === true);
@@ -261,7 +287,10 @@ function handleLogout(params, args) {
   const sheet = ss.getSheetByName("Attendance");
   
   const targetDate = resolveDate(args.date);
+  if (!targetDate) return sendEphemeralResponse("⚠️ *Invalid Date!* Please use `YYYY-MM-DD`, `=`, or `-n`/`+n`.");
+
   const targetTime = resolveTime(args.time);
+  if (!targetTime) return sendEphemeralResponse("⚠️ *Invalid Time!* Please use 24-hour `HH:MM` format (e.g., 09:30, 14:00) or `=`.");
   
   const isReplaced = (args.replace === "true" || args.replace === true);
   const reason = args.reason || "";
@@ -504,6 +533,12 @@ function handleLeave(params, args) {
   const userName = getSlackRealName(userId) || params.user_name;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Attendance");
+  
+  const targetDate = resolveDate(args.date);
+  if (!targetDate) return sendEphemeralResponse("⚠️ *Invalid Date!* Please use `YYYY-MM-DD`, `=`, or `-n`/`+n`.");
+
+  const targetTime = resolveTime(args.time);
+  if (!targetTime) return sendEphemeralResponse("⚠️ *Invalid Time!* Please use 24-hour `HH:MM` format (e.g., 09:30, 14:00) or `=`.");
 
   const type = args.type ? String(args.type).toUpperCase() : null;
   const validTypes = {
