@@ -161,7 +161,6 @@ function sendEphemeralResponse(text) {
 
 
 function handleLogin(params, args) {
-  
   const userId = params.user_id;
   const userName = getSlackRealName(userId) || params.user_name;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -212,7 +211,14 @@ function handleLogin(params, args) {
   let foundRow = -1;
 
   for (let i = data.length - 1; i >= 1; i--) {
-    const rowDate = String(data[i][1]).trim();
+    // FORMAT FIX: Translate raw Date object to YYYY-MM-DD
+    let rowDate = "";
+    if (data[i][1] instanceof Date) {
+      rowDate = Utilities.formatDate(data[i][1], "GMT+5", "yyyy-MM-dd");
+    } else {
+      rowDate = String(data[i][1]).trim();
+    }
+    
     const rowSlackId = String(data[i][15]).trim(); // Column P
     if (rowDate === targetDate && rowSlackId === userId) {
       foundRow = i + 1; 
@@ -336,7 +342,14 @@ function handleLogout(params, args) {
   let loginTime = "";
 
   for (let i = data.length - 1; i >= 1; i--) {
-    const rowDate = String(data[i][1]).trim();
+    // FORMAT FIX: Translate raw Date object to YYYY-MM-DD
+    let rowDate = "";
+    if (data[i][1] instanceof Date) {
+      rowDate = Utilities.formatDate(data[i][1], "GMT+5", "yyyy-MM-dd");
+    } else {
+      rowDate = String(data[i][1]).trim();
+    }
+    
     const rowSlackId = String(data[i][15]).trim(); // Column P
     if (rowDate === targetDate && rowSlackId === userId) {
       foundRow = i + 1;
