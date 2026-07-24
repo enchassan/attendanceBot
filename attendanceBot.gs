@@ -166,6 +166,8 @@ function handleLogin(params, args) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Attendance");
   
+  const sheetTz = ss.getSpreadsheetTimeZone(); 
+  
   const targetDate = resolveDate(args.date);
   if (!targetDate) return sendEphemeralResponse("⚠️ *Invalid Date!* Please use `YYYY-MM-DD`, `=`, or `-n`/`+n`.");
 
@@ -176,7 +178,8 @@ function handleLogin(params, args) {
   const isWfh = (args.wfh === "true" || args.wfh === true);
   const reason = args.reason || "";
   
-  const actualTimestamp = Utilities.formatDate(new Date(), "GMT+5", "yyyy-MM-dd HH:mm:ss");
+  // Use sheetTz universally to ensure 100% sync with the spreadsheet
+  const actualTimestamp = Utilities.formatDate(new Date(), sheetTz, "yyyy-MM-dd HH:mm:ss");
   const todayStr = actualTimestamp.split(" ")[0]; 
   
   if (targetDate > todayStr) {
@@ -199,7 +202,7 @@ function handleLogin(params, args) {
   for (let i = data.length - 1; i >= 1; i--) {
     let rowDate = "";
     if (data[i][1] instanceof Date) {
-      rowDate = Utilities.formatDate(data[i][1], "GMT+5", "yyyy-MM-dd");
+      rowDate = Utilities.formatDate(data[i][1], sheetTz, "yyyy-MM-dd");
     } else {
       rowDate = String(data[i][1]).trim();
     }
@@ -217,19 +220,16 @@ function handleLogin(params, args) {
       return sendEphemeralResponse(`⚠️ *Leave Collision!* You have an approved leave scheduled for *${targetDate}*. You cannot log attendance on a leave day. If this is a mistake, contact HR.`);
     }
 
-    // =================================================================
-    // FORMAT FIX: Translate raw Time objects to clean HH:mm strings
-    // =================================================================
     let existingLoginTime = "";
     if (data[foundRow - 1][3] instanceof Date) {
-      existingLoginTime = Utilities.formatDate(data[foundRow - 1][3], "GMT+5", "HH:mm");
+      existingLoginTime = Utilities.formatDate(data[foundRow - 1][3], sheetTz, "HH:mm");
     } else {
       existingLoginTime = String(data[foundRow - 1][3]).replace(/'/g, '').trim();
     }
 
     let existingLogoutTime = "";
     if (data[foundRow - 1][8] instanceof Date) {
-      existingLogoutTime = Utilities.formatDate(data[foundRow - 1][8], "GMT+5", "HH:mm");
+      existingLogoutTime = Utilities.formatDate(data[foundRow - 1][8], sheetTz, "HH:mm");
     } else {
       existingLogoutTime = String(data[foundRow - 1][8]).replace(/'/g, '').trim();
     }
@@ -288,7 +288,9 @@ function handleLogout(params, args) {
   const userName = getSlackRealName(userId) || params.user_name;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Attendance");
-  
+
+  const sheetTz = ss.getSpreadsheetTimeZone(); 
+
   const targetDate = resolveDate(args.date);
   if (!targetDate) return sendEphemeralResponse("⚠️ *Invalid Date!* Please use `YYYY-MM-DD`, `=`, or `-n`/`+n`.");
 
@@ -297,7 +299,7 @@ function handleLogout(params, args) {
   
   const isReplaced = (args.replace === "true" || args.replace === true);
   const reason = args.reason || "";
-  const actualTimestamp = Utilities.formatDate(new Date(), "GMT+5", "yyyy-MM-dd HH:mm:ss");
+  const actualTimestamp = Utilities.formatDate(new Date(), sheetTz, "yyyy-MM-dd HH:mm:ss");
   const todayStr = actualTimestamp.split(" ")[0]; 
   
   if (targetDate > todayStr) {
@@ -321,7 +323,7 @@ function handleLogout(params, args) {
   for (let i = data.length - 1; i >= 1; i--) {
     let rowDate = "";
     if (data[i][1] instanceof Date) {
-      rowDate = Utilities.formatDate(data[i][1], "GMT+5", "yyyy-MM-dd");
+      rowDate = Utilities.formatDate(data[i][1], sheetTz, "yyyy-MM-dd");
     } else {
       rowDate = String(data[i][1]).trim();
     }
@@ -330,11 +332,8 @@ function handleLogout(params, args) {
     if (rowDate === targetDate && rowSlackId === userId) {
       foundRow = i + 1;
       
-      // =================================================================
-      // FORMAT FIX: Translate raw Time objects to clean HH:mm strings
-      // =================================================================
       if (data[i][3] instanceof Date) {
-        loginTime = Utilities.formatDate(data[i][3], "GMT+5", "HH:mm");
+        loginTime = Utilities.formatDate(data[i][3], sheetTz, "HH:mm");
       } else {
         loginTime = String(data[i][3]).replace(/'/g, '').trim();
       }
@@ -357,12 +356,9 @@ function handleLogout(params, args) {
     return sendEphemeralResponse(`⚠️ *Warning:* You logged out at *${targetTime}*, but I couldn't find your Login for today. An incomplete record has been generated and flagged for HR.`);
   }
 
-  // =================================================================
-  // FORMAT FIX: Translate raw Time objects to clean HH:mm strings
-  // =================================================================
   let existingLogoutTime = "";
   if (data[foundRow - 1][8] instanceof Date) {
-    existingLogoutTime = Utilities.formatDate(data[foundRow - 1][8], "GMT+5", "HH:mm");
+    existingLogoutTime = Utilities.formatDate(data[foundRow - 1][8], sheetTz, "HH:mm");
   } else {
     existingLogoutTime = String(data[foundRow - 1][8]).replace(/'/g, '').trim();
   }
@@ -395,7 +391,6 @@ function handleLogout(params, args) {
 
   return sendEphemeralResponse(`✅ Successfully *Logged Out 🔴* at *${targetTime}*.\n⏱️ *Hours logged:* ${totalHoursFormatted} hrs (${status})\n📝 *Reason:* ${reason || "None"}`);
 }
-
 // =================================================================
 // HELPER FUNCTIONS 
 // =================================================================
