@@ -557,6 +557,8 @@ function handleLeave(params, args) {
   const userName = getSlackRealName(userId) || params.user_name;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName("Attendance");
+  
+  const sheetTz = ss.getSpreadsheetTimeZone();
 
   const type = args.type ? String(args.type).toUpperCase() : null;
   const validTypes = {
@@ -568,19 +570,13 @@ function handleLeave(params, args) {
     return sendEphemeralResponse("⚠️ *Invalid Leave Type!* Please specify `--type` using A, A1, A2, S, S1, or S2.");
   }
 
-  // Extract inputs
   const fromDateStr = resolveDate(args.from);
   const toDateStr = args.to ? resolveDate(args.to) : fromDateStr;
 
-  // =================================================================
-  // EXCEPTION FIX: BAD STRING / INVERSION PREVENTION
-  // =================================================================
-  // If resolveDate returned null because of gibberish ("banana"), block it immediately.
   if (!fromDateStr || !toDateStr) {
     return sendEphemeralResponse("⚠️ *Invalid Date Format!* Please use `YYYY-MM-DD`, `=`, or `-n`/`+n` for your `--from` and `--to` parameters.");
   }
 
-  // Now it is 100% safe to parse these into JS Date objects
   const fromDate = new Date(fromDateStr);
   const toDate = new Date(toDateStr);
 
@@ -588,22 +584,20 @@ function handleLeave(params, args) {
     return sendEphemeralResponse("⚠️ *Invalid Date Range!* The `--from` date cannot be after the `--to` date.");
   }
 
-  // =================================================================
-  // EXCEPTION FIX: DUPLICATE & COLLISION PREVENTION
-  // =================================================================
-  // =================================================================
-  // EXCEPTION FIX: DATA SCALING SLOWDOWN (MEMORY OPTIMIZATION)
-  // =================================================================
   const lastRow = sheet.getLastRow();
-  
-  // Strictly bound the fetch to our 16 columns and grab raw data for speed
   const data = lastRow > 0 ? sheet.getRange(1, 1, lastRow, 16).getValues() : [];
   const existingUserDates = new Set();
   
   // Extract all dates this specific user already has a record for
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][15]).trim() === userId) {
-      existingUserDates.add(String(data[i][1]).trim());
+      let rowDate = "";
+      if (data[i][1] instanceof Date) {
+        rowDate = Utilities.formatDate(data[i][1], sheetTz, "yyyy-MM-dd");
+      } else {
+        rowDate = String(data[i][1]).trim();
+      }
+      existingUserDates.add(rowDate);
     }
   }
 
@@ -611,7 +605,8 @@ function handleLeave(params, args) {
   
   // Validate every requested date before writing anything
   for (let d = new Date(fromDate); d <= toDate; d.setDate(d.getDate() + 1)) {
-    const loopDateStr = Utilities.formatDate(d, "GMT+5", "yyyy-MM-dd");
+    // Force the loop date to use the exact same timezone string format
+    const loopDateStr = Utilities.formatDate(d, sheetTz, "yyyy-MM-dd");
     
     if (existingUserDates.has(loopDateStr)) {
       return sendEphemeralResponse(`⚠️ *Collision Detected!* You already have an attendance or leave record for *${loopDateStr}*. You cannot apply for leave over an existing record.`);
@@ -619,13 +614,9 @@ function handleLeave(params, args) {
     requestedDates.push(loopDateStr);
   }
 
-  const actualTimestamp = Utilities.formatDate(new Date(), "GMT+5", "yyyy-MM-dd HH:mm:ss");
+  const actualTimestamp = Utilities.formatDate(new Date(), sheetTz, "yyyy-MM-dd HH:mm:ss");
 
-  // =================================================================
-  // EXCEPTION FIX: THE 3-SECOND TIMEOUT TRAP (BATCH WRITING)
-  // =================================================================
   if (requestedDates.length > 0) {
-    // 1. Build the 2D Array in memory (Lightning fast)
     const rowsToInsert = requestedDates.map(dateStr => [
       "=ROW()-1", 
       dateStr, 
@@ -637,8 +628,6 @@ function handleLeave(params, args) {
       userId
     ]);
 
-    // 2. Execute ONE API call to write the entire block instantly
-    const lastRow = sheet.getLastRow();
     const numRows = rowsToInsert.length;
     const numCols = rowsToInsert[0].length;
     
