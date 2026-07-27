@@ -191,6 +191,13 @@ function handleLogin(params, args) {
     return sendEphemeralResponse(`⚠️ *Boundary Limit Exceeded!* You cannot add or modify attendance records older than 3 days (*${targetDate}*). Please contact HR for manual adjustments.`);
   }
 
+  const targetDateObj = new Date(targetDate);
+  const dayOfWeek = targetDateObj.getDay();
+  
+  if (dayOfWeek === 0 || dayOfWeek === 6) {
+    return sendEphemeralResponse(`⚠️ *Weekend Blocked!* You are trying to log an action for a weekend (*${targetDate}*). If you are logging approved overtime, please contact HR to authorize it.`);
+  }
+
   if (targetDate < todayStr && !isReplaced) {
     return sendEphemeralResponse(`⚠️ *Missing Replace Flag!* You are trying to log attendance for a past date (*${targetDate}*). You must use the \`--replace\` flag to authorize logging prior attendance.\nExample: \`/login --date ${targetDate} --replace --time HH:MM\``);
   }
@@ -200,6 +207,7 @@ function handleLogin(params, args) {
   let foundRow = -1;
 
   for (let i = data.length - 1; i >= 1; i--) {
+    if (!data[i] || !data[i][1] || !data[i][15]) continue;
     let rowDate = "";
     if (data[i][1] instanceof Date) {
       rowDate = Utilities.formatDate(data[i][1], sheetTz, "yyyy-MM-dd");
@@ -311,6 +319,13 @@ function handleLogout(params, args) {
     return sendEphemeralResponse(`⚠️ *Boundary Limit Exceeded!* You cannot add or modify attendance records older than 3 days (*${targetDate}*). Please contact HR for manual adjustments.`);
   }
 
+  const targetDateObj = new Date(targetDate);
+  const dayOfWeek = targetDateObj.getDay();
+  
+  if (dayOfWeek === 0 || dayOfWeek === 6) {
+    return sendEphemeralResponse(`⚠️ *Weekend Blocked!* You are trying to log an action for a weekend (*${targetDate}*). If you are logging approved overtime, please contact HR to authorize it.`);
+  }
+
   if (targetDate < todayStr && !isReplaced) {
     return sendEphemeralResponse(`⚠️ *Missing Replace Flag!* You are trying to log out for a past date (*${targetDate}*). You must use the \`--replace\` flag to authorize modifying prior attendance.\nExample: \`/logout --date ${targetDate} --replace --time HH:MM\``);
   }
@@ -321,6 +336,7 @@ function handleLogout(params, args) {
   let loginTime = "";
 
   for (let i = data.length - 1; i >= 1; i--) {
+    if (!data[i] || !data[i][1] || !data[i][15]) continue;
     let rowDate = "";
     if (data[i][1] instanceof Date) {
       rowDate = Utilities.formatDate(data[i][1], sheetTz, "yyyy-MM-dd");
@@ -391,9 +407,6 @@ function handleLogout(params, args) {
 
   return sendEphemeralResponse(`✅ Successfully *Logged Out 🔴* at *${targetTime}*.\n⏱️ *Hours logged:* ${totalHoursFormatted} hrs (${status})\n📝 *Reason:* ${reason || "None"}`);
 }
-// =================================================================
-// HELPER FUNCTIONS 
-// =================================================================
 
 function calcDecimalHours24(timeInStr, timeOutStr) {
   function toDec(t) {
@@ -467,7 +480,9 @@ function handleAttendance(params, args) {
 
   // We loop forward for monthly reports so the dates are in chronological order
   for (let i = 1; i < data.length; i++) {
+    if (!data[i] || !data[i][1] || !data[i][15]) continue;
     const rowSlackId = String(data[i][15]).trim(); // Column P
+    
     
     let rowDateStr = "";
     if (data[i][1] instanceof Date) {
@@ -587,6 +602,13 @@ function handleLeave(params, args) {
     return sendEphemeralResponse("⚠️ *Invalid Date Format!* Please use `YYYY-MM-DD`, `=`, or `-n`/`+n` for your `--from` and `--to` parameters.");
   }
 
+  const targetDateObj = new Date(targetDate);
+  const dayOfWeek = targetDateObj.getDay();
+  
+  if (dayOfWeek === 0 || dayOfWeek === 6) {
+    return sendEphemeralResponse(`⚠️ *Weekend Blocked!* You are trying to log an action for a weekend (*${targetDate}*). If you are logging approved overtime, please contact HR to authorize it.`);
+  }
+
   const fromDate = new Date(fromDateStr);
   const toDate = new Date(toDateStr);
 
@@ -601,6 +623,7 @@ function handleLeave(params, args) {
   // Extract all dates this specific user already has a record for
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][15]).trim() === userId) {
+      if (!data[i] || !data[i][1] || !data[i][15]) continue;
       let rowDate = "";
       if (data[i][1] instanceof Date) {
         rowDate = Utilities.formatDate(data[i][1], sheetTz, "yyyy-MM-dd");
