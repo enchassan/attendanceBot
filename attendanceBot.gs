@@ -242,37 +242,45 @@ function handleLogin(params, args) {
       existingLogoutTime = String(data[foundRow - 1][8]).replace(/'/g, '').trim();
     }
     
+    // =================================================================
+    // EXCEPTION FIX: ACCIDENTAL TIME OVERWRITE TRAP
+    // =================================================================
+    // If they are replacing but omitted --time, preserve their existing time
+    const safeTargetTime = (isReplaced && !args.time && existingLoginTime !== "") 
+      ? existingLoginTime 
+      : targetTime;
+
     if (existingLoginTime !== "" && !isReplaced) {
       return sendEphemeralResponse(`⚠️ *Already Logged In!* You checked in at *${existingLoginTime}*. If you are trying to overwrite this, you must use the \`--replace\` flag.`);
     }
 
     if (existingLogoutTime !== "") {
-      const loginDec = timeToDec(targetTime);
+      const loginDec = timeToDec(safeTargetTime); 
       const logoutDec = timeToDec(existingLogoutTime);
       
       if (loginDec > logoutDec) {
-        return sendEphemeralResponse(`⚠️ *Invalid Time!* Your login time (*${targetTime}*) cannot be later than your existing logout time (*${existingLogoutTime}*). Please use \`/login --replace --time HH:MM\`.`);
+        return sendEphemeralResponse(`⚠️ *Invalid Time!* Your login time (*${safeTargetTime}*) cannot be later than your existing logout time (*${existingLogoutTime}*). Please use \`/login --replace --time HH:MM\`.`);
       }
     }
 
-    sheet.getRange(foundRow, 4).setValue(`'${targetTime}`);       
+    sheet.getRange(foundRow, 4).setValue(`'${safeTargetTime}`);    
     sheet.getRange(foundRow, 5).setValue(isReplaced);             
     sheet.getRange(foundRow, 6).setValue(actualTimestamp);        
     sheet.getRange(foundRow, 7).setValue(reason);                 
     sheet.getRange(foundRow, 8).setValue(isWfh);                  
     
     if (existingLogoutTime !== "") {
-      const diffHours = calcDecimalHours24(targetTime, existingLogoutTime);
+      const diffHours = calcDecimalHours24(safeTargetTime, existingLogoutTime); 
       const totalHoursFormatted = Number(diffHours.toFixed(2));
       const status = totalHoursFormatted >= 8.5 ? "Full Day 🟢" : "Half Day 🟡";
 
       sheet.getRange(foundRow, 13).setValue(totalHoursFormatted); 
       sheet.getRange(foundRow, 14).setValue(status);              
 
-      return sendEphemeralResponse(`⚠️ *Attendance Recovered:* Your login for *${targetDate}* is set to *${targetTime}*. Since you already logged out at *${existingLogoutTime}*, your total hours are now *${totalHoursFormatted} hrs* (${status}).`);
+      return sendEphemeralResponse(`⚠️ *Attendance Recovered:* Your login for *${targetDate}* is set to *${safeTargetTime}*. Since you already logged out at *${existingLogoutTime}*, your total hours are now *${totalHoursFormatted} hrs* (${status}).`);
     }
 
-    return sendEphemeralResponse(`⚠️ *Attendance Overwritten:* Your login for *${targetDate}* is now updated to *${targetTime}*.\n*Note:* This overwrite has been flagged for HR review.`);
+    return sendEphemeralResponse(`⚠️ *Attendance Overwritten:* Your login for *${targetDate}* is now updated to *${safeTargetTime}*.\n*Note:* This overwrite has been flagged for HR review.`);
   }
 
   sheet.appendRow([
@@ -379,22 +387,29 @@ function handleLogout(params, args) {
     existingLogoutTime = String(data[foundRow - 1][8]).replace(/'/g, '').trim();
   }
 
+  // =================================================================
+  // EXCEPTION FIX: ACCIDENTAL TIME OVERWRITE TRAP
+  // =================================================================
+  const safeTargetTime = (isReplaced && !args.time && existingLogoutTime !== "") 
+    ? existingLogoutTime 
+    : targetTime;
+
   if (existingLogoutTime !== "" && !isReplaced) {
     return sendEphemeralResponse(`⚠️ *Already Logged Out!* You checked out at *${existingLogoutTime}*. To overwrite, use the \`--replace\` flag.`);
   }
 
   const loginDec = timeToDec(loginTime);
-  const targetLogoutDec = timeToDec(targetTime);
+  const targetLogoutDec = timeToDec(safeTargetTime); // 👈 Updated
 
   if (targetLogoutDec < loginDec) {
-    return sendEphemeralResponse(`⚠️ *Invalid Time!* Your logout time (*${targetTime}*) cannot be earlier than your login time (*${loginTime}*). Please use \`/logout --replace --time HH:MM\`.`);
+    return sendEphemeralResponse(`⚠️ *Invalid Time!* Your logout time (*${safeTargetTime}*) cannot be earlier than your login time (*${loginTime}*). Please use \`/logout --replace --time HH:MM\`.`);
   }
 
-  const diffHours = calcDecimalHours24(loginTime, targetTime);
+  const diffHours = calcDecimalHours24(loginTime, safeTargetTime); // 👈 Updated
   const totalHoursFormatted = Number(diffHours.toFixed(2));
   const status = totalHoursFormatted >= 8.5 ? "Full Day 🟢" : "Half Day 🟡";
 
-  sheet.getRange(foundRow, 9).setValue(`'${targetTime}`);          
+  sheet.getRange(foundRow, 9).setValue(`'${safeTargetTime}`);          
   sheet.getRange(foundRow, 10).setValue(isReplaced);               
   sheet.getRange(foundRow, 11).setValue(actualTimestamp);          
   sheet.getRange(foundRow, 12).setValue(reason);                   
@@ -402,10 +417,10 @@ function handleLogout(params, args) {
   sheet.getRange(foundRow, 14).setValue(status);                   
 
   if (isReplaced) {
-    return sendEphemeralResponse(`⚠️ *Logout Overwritten:* Your logout for *${targetDate}* is now *${targetTime}*. Total logged: ${totalHoursFormatted} hrs.\n*Note:* Overwrite flagged for HR review.`);
+    return sendEphemeralResponse(`⚠️ *Logout Overwritten:* Your logout for *${targetDate}* is now *${safeTargetTime}*. Total logged: ${totalHoursFormatted} hrs.\n*Note:* Overwrite flagged for HR review.`);
   }
 
-  return sendEphemeralResponse(`✅ Successfully *Logged Out 🔴* at *${targetTime}*.\n⏱️ *Hours logged:* ${totalHoursFormatted} hrs (${status})\n📝 *Reason:* ${reason || "None"}`);
+  return sendEphemeralResponse(`✅ Successfully *Logged Out 🔴* at *${safeTargetTime}*.\n⏱️ *Hours logged:* ${totalHoursFormatted} hrs (${status})\n📝 *Reason:* ${reason || "None"}`);
 }
 
 function calcDecimalHours24(timeInStr, timeOutStr) {
